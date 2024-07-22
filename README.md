@@ -1,0 +1,1 @@
+# Exercises for [Teach-rs](https://github.com/trifectatechfoundation/teach-rs)
