@@ -4,11 +4,13 @@ use serde::{de::Visitor, Deserialize, Serialize};
 
 #[derive(Debug)]
 /// Error creating BSN
-// TODO: update the enum to make it more descriptive
-// as there can be several reasons for a BSN to not be valid
 pub enum Error {
-    /// The BSN was invalid
-    InvalidBsn,
+    /// Invalid BSN length, should consists of 8 or 9 digits.
+    InvalidBsnLength(usize),
+    /// Invalid digit, should be 0 - 9.
+    InvalidBsnDigit { position: usize, digit: u8 },
+    /// 11 check failed
+    Failed11Check,
 }
 
 impl std::error::Error for Error {}
@@ -16,7 +18,16 @@ impl std::error::Error for Error {}
 impl Display for Error {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
-            Error::InvalidBsn => write!(f, "Invalid BSN number"),
+            Error::InvalidBsnLength(len) => {
+                write!(f, "Invalid BSN number: expect 8 or 9 digits, get {len}")
+            }
+            Error::InvalidBsnDigit { position, digit } => {
+                write!(
+                    f,
+                    "Invalid BSN number: invalid digit at index of {position}: '{digit}'"
+                )
+            }
+            Error::Failed11Check => write!(f, "Invalid BSN number: failed 11 check"),
         }
     }
 }
@@ -34,13 +45,40 @@ impl Bsn {
     /// Try to create a new BSN. Returns `Err` if the passed string
     /// does not represent a valid BSN
     pub fn try_from_string<B: ToString>(bsn: B) -> Result<Self, Error> {
-        todo!()
+        let bsn = bsn.to_string();
+        Bsn::validate(&bsn)?;
+        Ok(Bsn { inner: bsn })
     }
 
     /// Check whether the passed string represents a valid BSN.
     //  Returns `Err` if the passed string does not represent a valid BSN
     pub fn validate(bsn: &str) -> Result<(), Error> {
-        todo!()
+        let bsn = bsn.as_bytes();
+
+        if bsn.len() != 8 && bsn.len() != 9 {
+            return Err(Error::InvalidBsnLength(bsn.len()));
+        }
+
+        let mut checksum: i32 = 0;
+        for (pos, &d) in bsn.iter().enumerate() {
+            match d {
+                b'0'..=b'9' => {
+                    let factor = if pos == 8 { -1 } else { 9 - pos as i32 };
+                    checksum += ((d - b'0') as i32) * factor;
+                }
+                _ => {
+                    return Err(Error::InvalidBsnDigit {
+                        position: pos,
+                        digit: d,
+                    })
+                }
+            }
+        }
+        if checksum % 11 != 0 {
+            return Err(Error::Failed11Check);
+        }
+
+        Ok(())
     }
 }
 
@@ -49,7 +87,7 @@ impl Serialize for Bsn {
     where
         S: serde::Serializer,
     {
-        todo!("Serialize `self.inner` into a `str`")
+        serializer.serialize_str(&self.inner)
     }
 }
 
@@ -70,9 +108,16 @@ impl<'de> Deserialize<'de> for Bsn {
 
             // TODO: Override the correct `Visitor::visit_*` to validate the input and output a new `BSN`
             // if the input represents a valid BSN. Note that we do not need to override all default methods
+
+            fn visit_str<E>(self, v: &str) -> Result<Self::Value, E>
+            where
+                E: serde::de::Error,
+            {
+                Bsn::try_from_string(v).map_err(|e| E::custom(e))
+            }
         }
 
-        todo!("use `deserializer` to deserialize a str using a `BsnVisitor`");
+        deserializer.deserialize_str(BsnVisitor)
     }
 }
 
@@ -83,10 +128,20 @@ mod tests {
     #[test]
     fn test_validation() {
         let bsns = include_str!("../valid_bsns.in").lines();
-        bsns.for_each(|bsn| assert!(Bsn::validate(bsn).is_ok(), "BSN {bsn} is valid, but did not pass validation"));
+        bsns.for_each(|bsn| {
+            assert!(
+                Bsn::validate(bsn).is_ok(),
+                "BSN {bsn} is valid, but did not pass validation"
+            )
+        });
 
         let bsns = include_str!("../invalid_bsns.in").lines();
-        bsns.for_each(|bsn| assert!(Bsn::validate(bsn).is_err(), "BSN {bsn} invalid, but passed validation"));
+        bsns.for_each(|bsn| {
+            assert!(
+                Bsn::validate(bsn).is_err(),
+                "BSN {bsn} invalid, but passed validation"
+            )
+        });
     }
 
     #[test]
