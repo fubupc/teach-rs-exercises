@@ -73,8 +73,8 @@ fn document_frequency<'a>(
     // map each document to a hashmap that maps words to whether they occur (use `term_occurrence`),
     // then reduce, combining the counts.
     documents
-        .map(|doc| term_occurrence(doc))
-        .reduce(|| HashMap::new(), |a, b| combine_occurrences(a, b))
+        .map(term_occurrence)
+        .reduce(HashMap::default, combine_occurrences)
 }
 
 fn score_document(
