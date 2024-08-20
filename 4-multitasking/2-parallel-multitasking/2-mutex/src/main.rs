@@ -15,16 +15,19 @@
 use std::{
     cell::UnsafeCell,
     ops::{Deref, DerefMut},
-    sync::atomic::{AtomicBool, Ordering},
+    sync::atomic::{AtomicU32, Ordering},
 };
+
+use atomic_wait::{wait, wake_one};
 
 struct Mutex<T> {
     cell: UnsafeCell<T>,
-    locked: AtomicBool,
+    locked: AtomicU32, // 0 means unlocked, 1 means locked.
 }
 
-// TODO implement Send for Mutex<T>.
-//
+// Implement Send for Mutex<T>.
+unsafe impl<T: Send> Send for Mutex<T> {}
+
 // Implementing `Sync` is an assertion that `Mutex<T>` is safe to move between threads, which is
 // equivalent to saying that `&Mutex<T>` implement `Send`.
 //
@@ -45,32 +48,31 @@ impl<T> Mutex<T> {
     pub fn new(value: T) -> Self {
         Mutex {
             cell: UnsafeCell::new(value),
-            locked: AtomicBool::new(false),
+            locked: AtomicU32::new(0),
         }
     }
 
     fn block_until_you_lock(&self) {
-        // loop until `locked` becomes false, then set it to `true`
-        while self.locked.swap(true, Ordering::Acquire) {
-            // a hint to the OS that it should maybe prioritise other threads
-            std::hint::spin_loop();
+        // loop until `locked` becomes 0, then set it to 1
+        while self.locked.swap(1, Ordering::Acquire) == 1 {
+            wait(&self.locked, 0);
         }
     }
 
     fn unlock(&self) {
-        self.locked.store(false, Ordering::Release);
+        self.locked.store(0, Ordering::Release);
+        wake_one(&self.locked)
     }
 
     pub fn lock(&self) -> MutexGuard<T> {
-        // TODO: implement lock()
-        todo!()
+        self.block_until_you_lock();
+        MutexGuard { mutex: self }
     }
 
     pub fn into_inner(self) -> T {
-        // TODO: implement into_inner()
         // hint: look at the available functions on UnsafeCell
         // question: do you need to `block_until_you_lock`?
-        todo!()
+        self.cell.into_inner()
     }
 }
 
@@ -102,7 +104,7 @@ impl<T> DerefMut for MutexGuard<'_, T> {
     }
 }
 
-// TODO: implement a `Drop` for MutexGuard that unlocks the mutex
+// Implement a `Drop` for MutexGuard that unlocks the mutex
 // use the `unlock` method that is already defined for `Mutex`
 
 // The function main() should execute cleanly and normally, i.e. without entering a deadlock
@@ -111,6 +113,11 @@ impl<T> DerefMut for MutexGuard<'_, T> {
 // imaginary bonus points: use the atomic_wait crate https://docs.rs/atomic-wait/latest/atomic_wait/index.html
 // to replace the spin loop with something more efficient. This section https://marabos.nl/atomics/building-locks.html#mutex of
 // "Rust Atomics and Locks" explains how to do it (and has lots of other good stuff too)
+impl<T> Drop for MutexGuard<'_, T> {
+    fn drop(&mut self) {
+        self.mutex.unlock();
+    }
+}
 
 fn main() {
     let n = Mutex::new(String::from("threads: "));
