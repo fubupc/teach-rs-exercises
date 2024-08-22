@@ -37,7 +37,24 @@ impl<T> Future for Receiver<T> {
         cx: &mut std::task::Context<'_>,
     ) -> std::task::Poll<Self::Output> {
         let mut inner = self.inner.lock().unwrap();
-        todo!("Implement me")
+        match inner.data.take() {
+            Some(data) => Poll::Ready(Ok(data)),
+            None => {
+                if inner.tx_dropped {
+                    Poll::Ready(Err(RecvError::SenderDropped))
+                } else {
+                    inner.waker = Some(cx.waker().clone());
+                    Poll::Pending
+                }
+            }
+        }
+    }
+}
+
+impl<T> Drop for Receiver<T> {
+    fn drop(&mut self) {
+        let mut inner = self.inner.lock().unwrap();
+        inner.rx_dropped = true;
     }
 }
 
@@ -47,7 +64,25 @@ pub struct Sender<T> {
 
 impl<T> Sender<T> {
     pub fn send(self, value: T) -> Result<(), SendError<T>> {
-        todo!("Implement me")
+        let mut inner = self.inner.lock().unwrap();
+        if inner.rx_dropped {
+            return Err(SendError::ReceiverDropped(value));
+        }
+        inner.data = Some(value);
+        if let Some(waker) = inner.waker.take() {
+            waker.wake();
+        }
+        Ok(())
+    }
+}
+
+impl<T> Drop for Sender<T> {
+    fn drop(&mut self) {
+        let mut inner = self.inner.lock().unwrap();
+        inner.tx_dropped = true;
+        if let Some(waker) = inner.waker.take() {
+            waker.wake();
+        }
     }
 }
 
