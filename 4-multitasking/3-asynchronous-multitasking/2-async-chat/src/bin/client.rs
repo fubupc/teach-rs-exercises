@@ -1,5 +1,5 @@
 use anyhow::Result;
-use chat::Message;
+use chat::{serialize_message, Message};
 use tokio::{
     io::{AsyncBufReadExt, AsyncWriteExt, BufReader, Lines, Stdin},
     join,
@@ -16,13 +16,14 @@ async fn main() -> Result<()> {
     let mut stdin_lines = BufReader::new(stdin).lines();
 
     println!("Enter your username and press <enter>");
-    let username = stdin_lines.next_line().await?.unwrap();
+    let mut username = stdin_lines.next_line().await?.unwrap();
+    username.truncate(username.trim_end().len()); // Trim newline at the end.
     let username = Message::User(username);
     println!("Connecting to server...");
     let stream = TcpStream::connect("127.0.0.1:8000").await?;
     let (tcp_read, mut tcp_write) = stream.into_split();
 
-    todo!("Send {username:?} to the server as JSON, along with a newline");
+    tcp_write.write_all(&serialize_message(username)?).await?;
     println!("Connected! You can now enter messages!");
 
     let chat_input_task = task::spawn(handle_chat_input(stdin_lines, tcp_write));
@@ -35,9 +36,10 @@ async fn handle_chat_input(
     mut stdin: Lines<BufReader<Stdin>>,
     mut tcp_write: OwnedWriteHalf,
 ) -> Result<()> {
-    todo!("For every line of stdin, create a Message::ClientMessage
-        containing the line as content, and send it to the server,
-        along with a newline");
+    while let Some(line) = stdin.next_line().await? {
+        let msg = Message::ClientMessage(line);
+        tcp_write.write_all(&serialize_message(msg)?).await?;
+    }
     Ok(())
 }
 
