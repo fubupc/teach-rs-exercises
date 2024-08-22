@@ -187,7 +187,7 @@ mod tests {
 
     use super::channel;
 
-    #[tokio::test]
+    #[tokio::test(flavor = "multi_thread")]
     async fn test_send_recv() {
         let (tx, rx) = channel();
 
@@ -224,7 +224,8 @@ mod tests {
             .collect();
 
         for msgs in join_all(rxs).await {
-            let msgs = msgs.unwrap();
+            let mut msgs = msgs.unwrap();
+            msgs.sort();
             let expect: Vec<_> = (0..tx_num)
                 .flat_map(|i| (0..n).map(move |j| i * n + j))
                 .collect();
