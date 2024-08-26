@@ -1,3 +1,11 @@
+use libc::size_t;
+
+#[no_mangle]
+pub extern "C" fn crc32(data: *const u8, data_length: size_t) -> u32 {
+    let data = unsafe { std::slice::from_raw_parts(data, data_length) };
+    crc32_rust(data)
+}
+
 fn crc32_rust(data: &[u8]) -> u32 {
     let mut crc32 = 0xFFFFFFFFu32;
 
